@@ -1,9 +1,12 @@
 # Firebusters deployment architecture
 
-**Status:** Accepted  
-**Decision:** Use Koyeb instead of Render for the hackathon backend.
+**Status:** Target architecture accepted; temporary deployment override active
 
-This file is the authoritative record of the deployment decision. If another document conflicts with it, this decision takes precedence.
+**Target decision:** Use Koyeb for the backend.
+
+**Temporary decision:** Use Render for the deadline deployment while Koyeb account approval is pending.
+
+This file is the authoritative record of the deployment decision. The application is currently deployed to Render for the hackathon deadline. Migrate the same Docker service to Koyeb after account approval; Supabase, R2 and Vercel do not change.
 
 ## Architecture
 
@@ -51,6 +54,18 @@ Koyeb is the selected hackathon backend because it supports:
 Deploy the service in Frankfurt when the free instance is available there. Keep Supabase in the closest practical region. Koyeb may require payment-card verification even when the selected instance is free.
 
 Google Cloud Run remains the stronger fallback when a billing account is acceptable. It offers more configurable memory and Cloud Run Jobs, but has more setup and accidental-billing risk.
+
+### Temporary Render deployment
+
+Koyeb account approval was not available before the deployment deadline. Render is therefore the active short-term backend because it can deploy the existing Dockerfile directly from GitHub without introducing a new billing or IAM setup.
+
+This does not change the workload boundary:
+
+- Heavy ingestion stays local.
+- PostgreSQL and vectors stay in Supabase.
+- Large assets stay in R2.
+- Render serves only the online API.
+- Warm the free Render service immediately before judging because it sleeps after inactivity.
 
 ## Data placement
 
@@ -129,4 +144,3 @@ Required repository work:
 3. Add Supabase schema migrations.
 4. Add Koyeb secrets and deploy the API.
 5. Configure Vercel and R2 after the Koyeb public domain is known.
-
