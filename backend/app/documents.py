@@ -9,6 +9,8 @@ FILES = {
     "PSI-159_Reports_FinalRpt_ACME.CFI-G.pdf",
     "PSI-117_Presentations_PSI_Users_Group_Cool_Flames_in_Space_03302026.pdf",
     "PSI-117_Presentations_Three_Stage_Cool_Flame_TFarouk.pdf",
+    "ISS Denver 2013-BASS.pdf",
+    "SRD_BASS.pdf",
 }
 
 
@@ -25,7 +27,7 @@ def prepare_documents(root: Path) -> dict:
         source["status"] = "text_extracted_needs_review"
         source["empty_pages"] = len(pages) - len(readable)
         citations.extend(readable)
-    # Existing investigations are deliberately not overwritten; load research-v1 first.
+    # Existing investigations are deliberately not overwritten; load the research bundle first.
     return {"version": "documents-v1", "investigations": [], "sources": sources,
             "citations": citations, "experiments": [], "charts": []}
 

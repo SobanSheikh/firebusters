@@ -44,7 +44,7 @@ export default function ResearchAssistant({
   const [error, setError] = useState("");
   const suggestions = [
     "Which indexed evidence is most relevant to cool-flame extinction, and why?",
-    "What pressures and burn times are reported for ethane tests?",
+    "Why did nitrogen fail to extinguish some BASS solid-material flames?",
     "What can this evidence support about an oxygen-enriched lunar habitat—and what remains unknown?",
     "Which available variables could support predictive modeling?",
   ];
@@ -82,7 +82,7 @@ export default function ResearchAssistant({
   }
   return (
     <section className="section" id="assistant">
-      <p className="eyebrow">03 / ASK FIREBUSTERS</p>
+      <p className="eyebrow">04 / ASK FIREBUSTERS</p>
       <h2>Ask the evidence.</h2>
       <p className="muted">
         Search experiment records, chart points, and PDF passages with semantic

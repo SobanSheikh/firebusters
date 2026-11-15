@@ -82,7 +82,8 @@ async def retrieve(state: ResearchState):
     elif terms:
         experiments = await records(
             "SELECT payload FROM fb_experiments WHERE "
-            "to_tsvector('english',concat_ws(' ',fuel,payload->>'run',payload->>'comments')) "
+            "to_tsvector('english',concat_ws(' ',fuel,payload->>'run',payload->>'comments',"
+            "payload->>'observation',payload->>'derived_outcome')) "
             "@@ to_tsquery('english',:terms) ORDER BY id LIMIT 6",
             terms=terms,
         )
@@ -94,7 +95,7 @@ async def retrieve(state: ResearchState):
             {
                 "citation_id": experiment["citation_id"],
                 "kind": "experiment",
-                "label": f"PSI-159 test {experiment['run']}",
+                "label": f"{experiment['investigation_id']} test {experiment['run']}",
                 "data": experiment,
             }
         )
@@ -293,6 +294,37 @@ async def synthesize(state: ResearchState):
             "message": "No matching evidence in the indexed records and PDF pages. Try a fuel, variable, test ID, or a narrower fire-safety question.",
             "usage": usage,
         }
+    if state.get("experiment_ids"):
+        selected = [item for item in state["evidence"] if item.get("kind") == "experiment"]
+        claims = []
+        for item in selected[:4]:
+            data = item["data"]
+            if data.get("investigation_id") != "PSI-159":
+                continue
+            pressure = data.get("pressure_bar")
+            flow = data.get("fuel_flow_mg_s")
+            duration = data.get("burn_time_s")
+            parts = [f"{data['run']} used {data['fuel']}"]
+            parts.append(f"at {pressure} bar" if pressure is not None else "at an unreported pressure")
+            parts.append(f"with {flow} mg/s fuel flow" if flow is not None else "with unreported fuel flow")
+            parts.append(
+                f"for {duration} s" if duration is not None else "with no reported burn duration"
+            )
+            termination = data.get("termination_label", "Not reported")
+            parts.append(f"and ended by {termination.lower()}")
+            if data.get("hot_ignition"):
+                parts.append(f"hot ignition: {data['hot_ignition']}")
+            claims.append({"text": "; ".join(parts) + ".", "citation_ids": [item["citation_id"]]})
+        if claims:
+            return {
+                "claims": claims,
+                "follow_up_questions": [
+                    "Would you like to inspect the oxygen, temperature, and flame-type fields for these runs?"
+                ],
+                "mode": "curated_comparison",
+                "message": "Selected-run values are rendered deterministically to preserve record association.",
+                "usage": usage,
+            }
     if not settings.ai_api_key or settings.ai_provider not in {"groq", "gemini", "openai"}:
         return {
             "claims": [],
@@ -329,7 +361,7 @@ async def synthesize(state: ResearchState):
                                 {
                                     "question": state["question"],
                                     "question_intent": state.get("intent", "research"),
-                                    "reviewed_scope": "Indexed PSI-117 and PSI-159 evidence only",
+                                    "reviewed_scope": "Indexed PSI-26, PSI-117, and PSI-159 evidence only",
                                     "evidence": evidence_for_model,
                                 }
                             ),

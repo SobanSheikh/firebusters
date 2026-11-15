@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import ConditionExplorer from "./ConditionExplorer";
 import EvidenceDialog from "./EvidenceDialog";
 import ResearchAssistant from "./ResearchAssistant";
+import SuppressionExplorer from "./SuppressionExplorer";
 const ResearchChart = lazy(() => import("./ResearchChart"));
 import { api } from "./lib/api";
 
@@ -34,6 +35,12 @@ type Experiment = {
   citation_id: string;
   comments: string;
   termination: string;
+  termination_label: string;
+  flame_type: string;
+  hot_ignition: string | null;
+  oxygen_before: number | null;
+  oxygen_after: number | null;
+  peak_burner_temperature_c: number | null;
 };
 type Citation = {
   id: string;
@@ -93,8 +100,14 @@ export default function App() {
       "pressure_bar",
       "fuel_flow_mg_s",
       "burn_time_s",
+      "flame_type",
+      "hot_ignition",
+      "oxygen_before",
+      "oxygen_after",
+      "peak_burner_temperature_c",
       "comments",
       "termination",
+      "termination_label",
       "citation_id",
     ];
     const csv = [
@@ -131,7 +144,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    const sections = ["mission", "experiments", "chart", "assistant"]
+    const sections = ["mission", "experiments", "suppression", "chart", "assistant"]
       .map((id) => document.getElementById(id))
       .filter((section): section is HTMLElement => section !== null);
     let frame = 0;
@@ -168,6 +181,7 @@ export default function App() {
         </a>
         <a href="#mission">Mission</a>
         <a href="#experiments">Experiments</a>
+        <a href="#suppression">Suppression</a>
         <a href="#chart">Data lab</a>
         <a href="#assistant">Ask AI</a>
         <button
@@ -188,8 +202,9 @@ export default function App() {
           {[
             ["mission", "1 · Mission"],
             ["experiments", "2 · Evidence"],
-            ["chart", "3 · Chart"],
-            ["assistant", "4 · Ask + cite"],
+            ["suppression", "3 · Suppression"],
+            ["chart", "4 · Chart"],
+            ["assistant", "5 · Ask + cite"],
           ].map(([id, label]) => (
             <a
               key={id}
@@ -311,10 +326,11 @@ export default function App() {
           <div>
             <p className="eyebrow">CURRENT EVIDENCE COVERAGE</p>
             <strong>
-              2 reviewed investigations · 3 source PDFs · 922 semantic passages
+              {overview.data?.investigations.length ?? "—"} reviewed investigations · cited
+              tables, charts, and PDF evidence
             </strong>
             <p>
-              This MVP ranks only the indexed PSI-117 and PSI-159 evidence. It
+              This release indexes reviewed PSI-26, PSI-117, and PSI-159 evidence. It
               does not claim coverage of the full PSI combustion archive.
             </p>
           </div>
@@ -381,6 +397,7 @@ export default function App() {
                   <th>Pressure (bar)</th>
                   <th>Fuel flow (mg/s)</th>
                   <th>Burn time (s)</th>
+                  <th>Outcome</th>
                   <th>Evidence</th>
                 </tr>
               </thead>
@@ -407,6 +424,7 @@ export default function App() {
                     <td>{format(e.pressure_bar)}</td>
                     <td>{format(e.fuel_flow_mg_s)}</td>
                     <td>{format(e.burn_time_s)}</td>
+                    <td>{e.termination_label}</td>
                     <td>
                       <button onClick={() => setCitationId(e.citation_id)}>
                         Source ↗
@@ -466,6 +484,7 @@ export default function App() {
                     mg/s
                   </p>
                   <p>{format(e.burn_time_s)} s reported burn time</p>
+                  <p>{e.termination_label} · hot ignition {e.hot_ignition ?? "not reported"}</p>
                   <p className="muted">
                     {e.comments || "No additional comment recorded."}
                   </p>
@@ -482,8 +501,9 @@ export default function App() {
           </div>
         )}
       </section>
+      <SuppressionExplorer onCitation={setCitationId} />
       <section className="section" id="chart">
-        <p className="eyebrow">02 / THE DATA LAB</p>
+        <p className="eyebrow">03 / THE DATA LAB</p>
         <h2>A droplet’s changing history.</h2>
         <p className="muted">
           PSI-117 · Experimental series from the three-stage combustion dataset.
@@ -573,7 +593,9 @@ export default function App() {
               <p className="eyebrow">
                 {citation.data.locator.kind === "pdf_page"
                   ? "PDF PAGE EVIDENCE"
-                  : "ORIGINAL CSV RECORD"}
+                  : citation.data.locator.kind === "xlsx_record"
+                    ? "ORIGINAL WORKBOOK ROW"
+                    : "ORIGINAL CSV RECORD"}
               </p>
               <h3>{citation.data.filename}</h3>
               <pre>{JSON.stringify(citation.data.locator, null, 2)}</pre>

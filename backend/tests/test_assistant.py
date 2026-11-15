@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.assistant_service import graph, search_terms, validate_claims
+from app.assistant_service import graph, search_terms, synthesize, validate_claims
 
 
 class AssistantTests(unittest.IsolatedAsyncioTestCase):
@@ -11,6 +11,37 @@ class AssistantTests(unittest.IsolatedAsyncioTestCase):
             result = await graph.ainvoke({"question": "How do lunar rocks form?", "experiment_ids": [], "chart_id": None})
         self.assertEqual(result["mode"], "no_evidence")
         self.assertEqual(result["claims"], [])
+
+    async def test_selected_comparison_keeps_each_value_with_its_record(self):
+        evidence = [
+            {
+                "citation_id": "j1",
+                "kind": "experiment",
+                "data": {
+                    "investigation_id": "PSI-159", "run": "21088 J1", "fuel": "ethane",
+                    "pressure_bar": 0.9443956, "fuel_flow_mg_s": 2.0, "burn_time_s": 37.0,
+                    "termination_label": "Self-extinction", "hot_ignition": "Yes",
+                },
+            },
+            {
+                "citation_id": "p1",
+                "kind": "experiment",
+                "data": {
+                    "investigation_id": "PSI-159", "run": "21088 P1", "fuel": "ethane",
+                    "pressure_bar": 1.0133, "fuel_flow_mg_s": 1.0, "burn_time_s": 8.0,
+                    "termination_label": "Self-extinction", "hot_ignition": "Yes",
+                },
+            },
+        ]
+        result = await synthesize({
+            "question": "Compare selected runs", "experiment_ids": ["j1", "p1"],
+            "evidence": evidence, "usage": {},
+        })
+        self.assertEqual(result["mode"], "curated_comparison")
+        self.assertIn("0.9443956 bar", result["claims"][0]["text"])
+        self.assertEqual(result["claims"][0]["citation_ids"], ["j1"])
+        self.assertIn("1.0133 bar", result["claims"][1]["text"])
+        self.assertEqual(result["claims"][1]["citation_ids"], ["p1"])
 
     def test_search_input_is_bounded_and_has_no_query_operators(self):
         terms = search_terms("ethane; DROP TABLE -- '" + " test" * 100)

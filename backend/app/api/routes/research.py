@@ -26,7 +26,10 @@ async def records(query, **params):
 async def overview():
     investigations = await records("SELECT payload FROM fb_investigations ORDER BY id")
     charts = await records("SELECT payload FROM fb_charts ORDER BY id")
-    fuels = await records("SELECT DISTINCT fuel FROM fb_experiments ORDER BY fuel")
+    fuels = await records(
+        "SELECT DISTINCT fuel FROM fb_experiments "
+        "WHERE investigation_id='PSI-159' ORDER BY fuel"
+    )
     count = await records("SELECT count(*) AS total FROM fb_experiments")
     return {"investigations": [r["payload"] for r in investigations],
             "charts": [r["payload"] for r in charts],
@@ -34,14 +37,57 @@ async def overview():
 
 
 @router.get("/experiments")
-async def experiments(fuel: str | None = None, offset: int = Query(0, ge=0),
+async def experiments(fuel: str | None = None, investigation_id: str = "PSI-159",
+                      offset: int = Query(0, ge=0),
                       limit: int = Query(25, ge=1, le=100)):
-    where = "WHERE fuel = :fuel" if fuel else ""
-    params = {"fuel": fuel} if fuel else {}
+    if investigation_id not in {"PSI-159", "PSI-26"}:
+        raise HTTPException(400, "Unsupported investigation")
+    clauses = ["investigation_id = :investigation_id"]
+    params = {"investigation_id": investigation_id}
+    if fuel:
+        clauses.append("fuel = :fuel")
+        params["fuel"] = fuel
+    where = "WHERE " + " AND ".join(clauses)
     rows = await records(f"SELECT payload FROM fb_experiments {where} ORDER BY payload->>'run', id "
                          "LIMIT :limit OFFSET :offset", **params, limit=limit, offset=offset)
     count = await records(f"SELECT count(*) AS total FROM fb_experiments {where}", **params)
     return {"items": [r["payload"] for r in rows], "total": count[0]["total"]}
+
+
+@router.get("/suppression-experiments")
+async def suppression_experiments(material: str | None = None, outcome: str | None = None,
+                                  offset: int = Query(0, ge=0),
+                                  limit: int = Query(12, ge=1, le=100)):
+    clauses = ["investigation_id = 'PSI-26'"]
+    params = {}
+    if material:
+        clauses.append("payload->>'material' = :material")
+        params["material"] = material
+    if outcome:
+        clauses.append("payload->>'derived_outcome' = :outcome")
+        params["outcome"] = outcome
+    where = "WHERE " + " AND ".join(clauses)
+    rows = await records(
+        f"SELECT payload FROM fb_experiments {where} "
+        "ORDER BY (payload->>'run')::integer, id LIMIT :limit OFFSET :offset",
+        **params, limit=limit, offset=offset,
+    )
+    count = await records(f"SELECT count(*) AS total FROM fb_experiments {where}", **params)
+    materials = await records(
+        "SELECT DISTINCT payload->>'material' AS material FROM fb_experiments "
+        "WHERE investigation_id='PSI-26' ORDER BY material"
+    )
+    outcomes = await records(
+        "SELECT payload->>'derived_outcome' AS outcome, count(*) AS total "
+        "FROM fb_experiments WHERE investigation_id='PSI-26' "
+        "GROUP BY outcome ORDER BY total DESC, outcome"
+    )
+    return {
+        "items": [row["payload"] for row in rows],
+        "total": count[0]["total"],
+        "materials": [row["material"] for row in materials],
+        "outcomes": [{"outcome": row["outcome"], "total": row["total"]} for row in outcomes],
+    }
 
 
 @router.get("/citations/{citation_id}")

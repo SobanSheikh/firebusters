@@ -8,6 +8,12 @@ type ExperimentPoint = {
   citation_id: string;
   comments: string;
   termination: string;
+  termination_label: string;
+  flame_type: string;
+  hot_ignition: string | null;
+  oxygen_before: number | null;
+  oxygen_after: number | null;
+  peak_burner_temperature_c: number | null;
 };
 
 const COLORS = ["#ffad78", "#74c7c3", "#9aa8ff", "#f0cf75"];

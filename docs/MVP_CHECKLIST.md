@@ -9,7 +9,8 @@ Checked items have implementation or validation evidence. Unchecked items remain
 - [x] Prepare text chunks while preserving page citations.
 - [x] Parse PSI-115 grid, particle-distribution, and diameter formats separately.
 - [x] Flag extra values and nonfinite numbers rather than silently repairing them.
-- [x] Normalize 179 PSI-159 experiment records and 205 PSI-117 experimental chart points.
+- [x] Normalize 179 PSI-159 experiment records, 121 PSI-26 BASS as-run records, and 205 PSI-117 experimental chart points.
+- [x] Preserve every PSI-26 workbook row with a sheet/row citation, raw observation, original condition fields, and an explicitly derived (not source-authored) outcome label.
 - [x] Preserve unknown values, normalized units, and experimental/simulation distinctions.
 - [ ] Refresh the full inventory and ingestion bundle to include PSI-68.
 - [ ] Add reviewed adapters for remaining spreadsheets, metadata archives, and DOCX sources.
@@ -25,7 +26,7 @@ Checked items have implementation or validation evidence. Unchecked items remain
 - [x] Implement private-source upload/checksum verification and transactional upsert path.
 - [x] Implement stable source routes and fresh signed-URL resolution.
 - [x] Review migration and publication changes before applying them to Supabase.
-- [x] Apply the approved shared migration and upload the selected sources (2 files, 179 experiments, 384 citations, 205 chart points).
+- [x] Publish the reviewed production slice: 3 investigations, 8 checksum-verified sources, 300 experiments, 721 citations, 1,073 embedded passages, and one 205-point chart.
 - [x] Verify cloud download checksums and access restrictions; regenerate signed links twice per source. Expiry-boundary testing was not performed.
 - [ ] Add schema support for chunks/embeddings, richer measurements, derivations, boards, and review history.
 
@@ -34,6 +35,7 @@ Checked items have implementation or validation evidence. Unchecked items remain
 - [x] Build Mission Control layout with real collection counts.
 - [x] Add fuel filtering and paginated experiment records.
 - [x] Compare up to four experiments with source links.
+- [x] Add a PSI-26 suppression explorer with material/outcome filters, outcome distribution, paginated run cards, original observations, and workbook-row evidence.
 - [x] Plot the experimental PSI-117 series with a cited point inspector.
 - [x] Add the source drawer and original-file downloads.
 - [x] Validate local API filtering, pagination, citation locators, and source checksums.
@@ -47,10 +49,11 @@ Checked items have implementation or validation evidence. Unchecked items remain
 
 ## 4. AI research assistant
 
-- [x] Store 922 page-linked passages and normalized gte-small embeddings (384 dimensions) across 151 PDF pages.
+- [x] Store 1,073 page-linked passages and normalized gte-small embeddings (384 dimensions) across 216 PDF pages in the local submission workspace.
 - [x] Implement bounded keyword/structured lookup over published experiment and chart records.
-- [x] Add local PDF-page keyword retrieval and PDF text in the citation drawer: three PDFs, 151 nonempty pages; focused retrieval and frontend build passed.
+- [x] Add local PDF-page keyword retrieval and PDF text in the citation drawer: five PDFs, 216 nonempty pages; focused retrieval and frontend build passed.
 - [x] Publish three PDFs and 151 page citations to Supabase; original downloads checksum-verified.
+- [x] Publish the two BASS PDFs, 65 added PDF-page citations, 121 PSI-26 workbook rows, and 151 added embeddings to the production evidence store.
 - [x] Deploy Supabase `bright-action` and configure server-only `EMBEDDING_SECRET`; anonymous requests return 401.
 - [x] Implement gte-small client, resumable indexing, private vector schema, and combined semantic/keyword retrieval with keyword fallback.
 - [x] Generate all 922 embeddings; verify exact offsets for every passage and a real semantic query with three page citations and a signed source download.
@@ -64,6 +67,7 @@ Checked items have implementation or validation evidence. Unchecked items remain
 - [ ] Add streamed workflow progress and response events.
 - [x] Provide evidence-only fallback when generation is unavailable and a deterministic cited-chart fallback when generated claims fail validation.
 - [x] Verify a real numerical question end-to-end: four cited claims, one reviewed chart, 12 bounded evidence records, one generation, and a roughly three-second local response.
+- [x] Make selected PSI-159 comparisons deterministic and verify J1/P1/K1 values against the original NASA CSV so run/value associations cannot be swapped by generation.
 
 ## 5. Stories, relationships, and impact
 
@@ -98,9 +102,8 @@ Run checks proportional to the change: build/lint for UI changes; citation and p
 
 ## Next execution order
 
-1. Complete the focused browser review, especially narrow-screen chart/source behavior and the judge route.
-2. Rehearse the three-minute judge journey and fix only presentation-blocking issues.
-3. Deploy the reviewed dev release, then verify Vercel-to-Render CORS, citations, rate-limit behavior, and source downloads.
-4. Expand chart coverage, stories, boards/exports, and curation after the presentation-critical path is stable.
+1. Deploy the reviewed release, then verify Vercel-to-Render CORS, citations, rate-limit behavior, and source downloads.
+2. Complete the focused browser review, especially PSI-26 filters/evidence, narrow-screen behavior, and the judge route.
+3. Rehearse the three-minute judge journey and fix only submission-blocking issues.
 
 The later product phase expands datasets and infrastructure; the core features above belong to the judged MVP.
