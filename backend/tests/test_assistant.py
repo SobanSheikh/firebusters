@@ -23,6 +23,18 @@ class AssistantTests(unittest.IsolatedAsyncioTestCase):
                                  "claims": [{"text": "Value 12", "citation_ids": ["invented"]}]})
         self.assertEqual(result["claims"], [])
 
+    def test_invalid_claim_does_not_hide_valid_claim(self):
+        evidence = [{"citation_id": "known", "data": {"topic": "cool flames"}}]
+        result = validate_claims({
+            "evidence": evidence,
+            "claims": [
+                {"text": "This statement is supported.", "citation_ids": ["known"]},
+                {"text": "This statement is not supported.", "citation_ids": ["invented"]},
+            ],
+        })
+        self.assertEqual(len(result["claims"]), 1)
+        self.assertIn("omitted", result["message"])
+
     def test_rounded_number_requires_approximation_cue(self):
         evidence = [{"citation_id": "a", "label": "PSI-117", "data": {"value": 0.966}}]
         accepted = validate_claims({"evidence": evidence, "claims": [

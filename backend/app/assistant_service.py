@@ -15,7 +15,13 @@ from app.semantic_search import semantic_evidence
 
 MAX_EVIDENCE = 12
 MAX_GENERATIONS = 1
-CHART_TERMS = {"droplet", "diameter", "three", "stage", "cool", "flame", "history", "normalized"}
+CHART_TERMS = {"droplet", "diameter", "history", "normalized", "chart", "plot", "curve", "series"}
+DEFINITION_PATTERNS = (
+    r"\bwhat (?:is|was|are|were)\b",
+    r"\b(?:define|describe)\b",
+    r"\b(?:give|provide) (?:me )?an? overview\b",
+    r"\bwhat (?:does|did) .{0,60} experiment (?:study|investigate|do)\b",
+)
 
 
 class ResearchState(TypedDict, total=False):
@@ -27,6 +33,7 @@ class ResearchState(TypedDict, total=False):
     claims: list[dict]
     follow_up_questions: list[str]
     usage: dict
+    intent: str
     mode: str
     message: str
 
@@ -49,11 +56,24 @@ def search_terms(question: str) -> str:
     return " | ".join(words[:24])
 
 
+def question_intent(question: str) -> str:
+    normalized = " ".join(question.lower().split())
+    return "definition" if any(re.search(pattern, normalized) for pattern in DEFINITION_PATTERNS) else "research"
+
+
+def chart_requested(question: str) -> bool:
+    normalized = " ".join(question.lower().replace("-", " ").split())
+    words = set(re.findall(r"[a-z0-9]+", normalized))
+    return bool(words & CHART_TERMS) or "three stage" in normalized
+
+
 async def retrieve(state: ResearchState):
     """One bounded hybrid retrieval pass; no model-selected loops or arbitrary SQL."""
-    evidence: list[dict] = []
+    experiment_evidence: list[dict] = []
+    chart_evidence: list[dict] = []
     visuals: list[dict] = []
     selected = state.get("experiment_ids", [])
+    intent = question_intent(state["question"])
     terms = search_terms(state["question"])
     if selected:
         experiments = await records(
@@ -70,7 +90,7 @@ async def retrieve(state: ResearchState):
         experiments = []
     for row in experiments:
         experiment = row["payload"]
-        evidence.append(
+        experiment_evidence.append(
             {
                 "citation_id": experiment["citation_id"],
                 "kind": "experiment",
@@ -80,18 +100,10 @@ async def retrieve(state: ResearchState):
         )
 
     chart_id = state.get("chart_id")
-    question_words = set(re.findall(r"[a-z0-9]+", state["question"].lower()))
     if chart_id:
         charts = await records("SELECT payload FROM fb_charts WHERE id=:id", id=chart_id)
-    elif question_words & CHART_TERMS:
+    elif chart_requested(state["question"]):
         charts = await records("SELECT payload FROM fb_charts ORDER BY id LIMIT 1")
-    elif terms:
-        charts = await records(
-            "SELECT payload FROM fb_charts WHERE "
-            "to_tsvector('english',payload->>'title') @@ to_tsquery('english',:terms) "
-            "ORDER BY id LIMIT 1",
-            terms=terms,
-        )
     else:
         charts = []
     for row in charts:
@@ -110,7 +122,7 @@ async def retrieve(state: ResearchState):
             if point["citation_id"] in chart_citations:
                 continue
             chart_citations.append(point["citation_id"])
-            evidence.append(
+            chart_evidence.append(
                 {
                     "citation_id": point["citation_id"],
                     "kind": "chart_point",
@@ -138,21 +150,30 @@ async def retrieve(state: ResearchState):
         )
 
     # Exactly one semantic query embedding at most; semantic_evidence falls back cleanly.
-    evidence.extend(await semantic_evidence(state["question"]))
+    semantic = await semantic_evidence(state["question"])
+    page_evidence: list[dict] = []
     if terms:
+        overview_order = (
+            "CASE "
+            "WHEN lower(c.payload->>'text') LIKE '%1. overview%' THEN 0 "
+            "WHEN lower(c.payload->>'text') LIKE '%science objectives%' THEN 1 "
+            "WHEN lower(c.payload->>'text') LIKE '%background%' THEN 2 ELSE 3 END, "
+            if intent == "definition" else ""
+        )
         pages = await records(
             "SELECT c.id, c.payload, s.payload->>'filename' AS filename "
             "FROM fb_citations c JOIN fb_sources s ON s.id=c.source_id "
             "WHERE c.payload->'locator'->>'kind'='pdf_page' AND "
+            "lower(coalesce(c.payload->>'text','')) NOT LIKE '%table of contents%' AND "
             "to_tsvector('english',coalesce(c.payload->>'text','')) @@ to_tsquery('english',:terms) "
-            "ORDER BY ts_rank_cd(to_tsvector('english',coalesce(c.payload->>'text','')), "
-            "to_tsquery('english',:terms)) DESC, c.id LIMIT 3",
+            f"ORDER BY {overview_order}ts_rank_cd("
+            "to_tsvector('english',coalesce(c.payload->>'text','')), "
+            "to_tsquery('english',:terms)) DESC, c.id LIMIT :page_limit",
             terms=terms,
+            page_limit=4 if intent == "definition" else 3,
         )
         for row in pages:
-            if any(item["citation_id"] == row["id"] for item in evidence):
-                continue
-            evidence.append(
+            page_evidence.append(
                 {
                     "citation_id": row["id"],
                     "kind": "document_page",
@@ -164,6 +185,18 @@ async def retrieve(state: ResearchState):
                     },
                 }
             )
+    if intent == "definition":
+        candidates = page_evidence + semantic + experiment_evidence[:3] + chart_evidence
+    else:
+        candidates = experiment_evidence + chart_evidence + semantic + page_evidence
+    evidence = []
+    seen = set()
+    for item in candidates:
+        if item["citation_id"] in seen:
+            continue
+        seen.add(item["citation_id"])
+        evidence.append(item)
+    evidence = evidence[:MAX_EVIDENCE]
     if evidence:
         valid = await records(
             "SELECT c.id FROM fb_citations c JOIN fb_sources s ON s.id=c.source_id "
@@ -171,13 +204,14 @@ async def retrieve(state: ResearchState):
             ids=[item["citation_id"] for item in evidence],
         )
         allowed = {row["id"] for row in valid}
-        evidence = [item for item in evidence if item["citation_id"] in allowed][:MAX_EVIDENCE]
+        evidence = [item for item in evidence if item["citation_id"] in allowed]
         for visual in visuals:
             visual["citation_ids"] = [citation for citation in visual["citation_ids"] if citation in allowed]
         visuals = [visual for visual in visuals if visual["citation_ids"]]
     return {
         "evidence": evidence,
         "visuals": visuals[:1],
+        "intent": intent,
         "usage": {"retrieval_passes": 1, "generation_calls": 0, "evidence_records": len(evidence)},
     }
 
@@ -198,21 +232,55 @@ Scientific safeguards:
 - Never relabel microgravity or normal-gravity evidence as lunar partial-gravity evidence.
 - Never infer that an oxygen-enriched lunar habitat is safe or unsafe from this evidence alone.
 - Distinguish observed results, report statements, hypotheses, simulations, and AI interpretation.
+- Distinguish proposed objectives and planned conditions from tests that were actually performed. Treat wording
+  such as proposal, hypothesis, objective, proposed, or "will be" as planned work unless completed tests are
+  independently documented. Preserve any
+  documented substitution or infeasible condition; never present a proposed fuel or condition as completed work.
+  State substitutions directly ("X was planned, but Y was used") instead of merging them as "X (or Y)."
+- When scientific value or impact comes from a proposal, explicitly say "the proposal argues" or "researchers
+  expected"; never present a proposed benefit as an achieved result or guaranteed outcome.
+- For general definitions, use audience-friendly language. Expand every acronym and technical symbol not present
+  in the user's question, or omit it; do not repeat unexplained source shorthand such as parameter symbols.
+- In the supplied CFI-G evidence, n-pentane was proposed but infeasible and ethane was used instead. Never say
+  n-pentane was tested, and omit the source symbols Zst and Tad unless the user explicitly asks about them.
 - Do not infer causes, combustion stages, thresholds, unreported units, or numerical calculations.
 - Treat PDF extraction as incomplete for figures and table structure.
 - If evidence is missing or incompatible, say exactly what remains unknown.
+Before returning JSON, silently verify that every claim follows the performed-versus-planned and plain-language
+rules above; rewrite any claim that does not.
 
 Response contract:
 Return JSON only, no markdown:
 {"claims":[{"text":"one concise supported statement","citation_ids":["exact supplied ID"]}],
  "follow_up_questions":["optional question"]}
 Give the direct answer first. Use at most 5 short claims, each supported by its cited data.
+For definition or overview questions, return exactly 4 claims: (1) identity and purpose, (2) setting and method,
+(3) inputs varied and measurements taken, and (4) the supported scientific value or practical importance.
+Do not omit the fourth importance claim. Do not include individual run IDs, individual
+run results, or detailed result conditions unless the user explicitly asks for results or examples.
+Do not mix investigations without explicitly naming the distinction and explaining why both are relevant.
 For relevance/ranking questions, rank only the retrieved evidence and state the reviewed-slice limitation.
 For modeling questions, name only variables actually present and describe them as inputs, not predictions.
 Numbers must be copied exactly from cited evidence with their reported units.
 Never claim the retrieved rows exhaust an investigation. If no direct answer is supported, return no claims
 and up to 3 useful follow-up questions that stay within the indexed collection.
 """
+
+
+def alias_evidence(evidence: list[dict]) -> tuple[list[dict], dict[str, str]]:
+    """Give the model short citation handles, then map them back before validation."""
+    aliases = {}
+    prepared = []
+    for index, item in enumerate(evidence, start=1):
+        alias = f"ref_{index}"
+        aliases[alias] = item["citation_id"]
+        prepared_item = {**item, "citation_id": alias}
+        if isinstance(item.get("data"), dict):
+            prepared_item["data"] = {
+                key: value for key, value in item["data"].items() if key != "citation_id"
+            }
+        prepared.append(prepared_item)
+    return prepared, aliases
 
 
 async def synthesize(state: ResearchState):
@@ -242,6 +310,7 @@ async def synthesize(state: ResearchState):
             "message": "Provider endpoint is not configured.",
             "usage": usage,
         }
+    evidence_for_model, citation_aliases = alias_evidence(state["evidence"])
     try:
         async with httpx.AsyncClient(timeout=settings.ai_timeout_seconds) as client:
             response = await client.post(
@@ -259,8 +328,9 @@ async def synthesize(state: ResearchState):
                             "content": json.dumps(
                                 {
                                     "question": state["question"],
+                                    "question_intent": state.get("intent", "research"),
                                     "reviewed_scope": "Indexed PSI-117 and PSI-159 evidence only",
-                                    "evidence": state["evidence"],
+                                    "evidence": evidence_for_model,
                                 }
                             ),
                         },
@@ -273,6 +343,12 @@ async def synthesize(state: ResearchState):
             follow_up = payload.get("follow_up_questions", [])
             if not isinstance(claims, list) or not isinstance(follow_up, list):
                 raise ValueError("Invalid response schema")
+            for claim in claims:
+                if isinstance(claim, dict) and isinstance(claim.get("citation_ids"), list):
+                    claim["citation_ids"] = [
+                        citation_aliases.get(citation, citation)
+                        for citation in claim["citation_ids"]
+                    ]
         return {
             "claims": claims[:5],
             "follow_up_questions": follow_up[:3],
@@ -342,6 +418,7 @@ def validate_claims(state: ResearchState):
     claims = state.get("claims", [])
     validated_claims = []
     adjusted = False
+    rejected_reason = None
     for claim in claims:
         if (
             not isinstance(claim, dict)
@@ -352,18 +429,22 @@ def validate_claims(state: ResearchState):
             or not claim["citation_ids"]
             or any(not isinstance(citation, str) or citation not in allowed for citation in claim["citation_ids"])
         ):
-            return validated_fallback(state, "The generated answer failed citation validation.")
+            rejected_reason = "The generated answer contained a statement with invalid citation data."
+            continue
         cited = [item for item in state["evidence"] if item["citation_id"] in claim["citation_ids"]]
         supported = {Decimal(number) for number in numbers(cited)}
         approximate = bool(re.search(r"\b(?:about|approximately|approx\.?|near|roughly)\b", claim["text"], re.I))
         claim_numbers = numbers(claim["text"])
         if any(not number_supported(number, supported, True) for number in claim_numbers):
-            return validated_fallback(state, "The generated answer included an unverified number.")
+            rejected_reason = "The generated answer contained a statement with an unverified number."
+            continue
         rounded = any(Decimal(number) not in supported for number in claim_numbers)
         if rounded and not approximate:
             claim = {**claim, "text": "Approximately, " + claim["text"][0].lower() + claim["text"][1:]}
             adjusted = True
         validated_claims.append(claim)
+    if claims and not validated_claims:
+        return validated_fallback(state, rejected_reason or "The generated answer failed validation.")
     follow_up = state.get("follow_up_questions", [])
     if any(not isinstance(question, str) or not 3 <= len(question.strip()) <= 180 for question in follow_up):
         return {"follow_up_questions": []}
@@ -371,6 +452,11 @@ def validate_claims(state: ResearchState):
         return {
             "mode": "evidence_only",
             "message": "The available records do not support a direct answer. Related evidence and useful next questions are shown below.",
+        }
+    if rejected_reason:
+        return {
+            "claims": validated_claims,
+            "message": "Some generated statements were omitted because they did not pass evidence validation.",
         }
     return {"claims": validated_claims} if adjusted else {}
 
