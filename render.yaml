@@ -30,11 +30,19 @@ services:
       - key: AI_PROVIDER
         value: groq
       - key: AI_MODEL
-        value: llama-3.3-70b-versatile
+        value: openai/gpt-oss-20b
       - key: AI_BASE_URL
         value: https://api.groq.com/openai/v1
       - key: AI_TIMEOUT_SECONDS
+        value: 35
+      - key: ASSISTANT_TIMEOUT_SECONDS
+        value: 65
+      - key: ASSISTANT_CLIENT_REQUESTS_PER_MINUTE
+        value: 6
+      - key: ASSISTANT_GLOBAL_REQUESTS_PER_MINUTE
         value: 30
+      - key: ASSISTANT_MAX_CONCURRENCY
+        value: 3
       - key: AI_MAX_OUTPUT_TOKENS
         value: 2048
       - key: GROQ_API_KEY

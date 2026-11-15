@@ -1,0 +1,3 @@
+[functions.bright-action]
+# The handler requires its own server-only secret; new Supabase keys are not JWTs.
+verify_jwt = false

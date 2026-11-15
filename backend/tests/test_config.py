@@ -5,7 +5,7 @@ def test_groq_defaults_to_openai_compatible_endpoint() -> None:
     settings = Settings(_env_file=None, groq_api_key="groq-test-key")
 
     assert settings.ai_provider == "groq"
-    assert settings.ai_model == "llama-3.3-70b-versatile"
+    assert settings.ai_model == "openai/gpt-oss-20b"
     assert settings.ai_api_key == "groq-test-key"
     assert settings.resolved_ai_base_url == "https://api.groq.com/openai/v1"
 

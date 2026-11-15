@@ -25,10 +25,13 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firebusters}:${POSTGRES_PASSWORD:-firebusters_dev}@db:5432/${POSTGRES_DB:-firebusters}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       AI_PROVIDER: ${AI_PROVIDER:-groq}
-      AI_MODEL: ${AI_MODEL:-llama-3.3-70b-versatile}
+      AI_MODEL: ${AI_MODEL:-openai/gpt-oss-20b}
       AI_BASE_URL: ${AI_BASE_URL:-https://api.groq.com/openai/v1}
       AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-30}
       AI_MAX_OUTPUT_TOKENS: ${AI_MAX_OUTPUT_TOKENS:-2048}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      EMBEDDING_FUNCTION_NAME: ${EMBEDDING_FUNCTION_NAME:-bright-action}
+      EMBEDDING_SECRET: ${EMBEDDING_SECRET:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
