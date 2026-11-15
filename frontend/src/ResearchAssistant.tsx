@@ -142,7 +142,7 @@ export default function ResearchAssistant({
             Include the droplet-history chart
           </label>
           <button type="submit" disabled={busy || question.trim().length < 3}>
-            {busy ? "Finding and checking evidence…" : "Ask Firebusters ↗"}
+            {busy ? "Retrieving and checking evidence…" : "Ask Firebusters ↗"}
           </button>
           {busy && (
             <button type="button" onClick={() => controller.current?.abort()}>
