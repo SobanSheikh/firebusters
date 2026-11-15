@@ -1,5 +1,6 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import ConditionExplorer from "./ConditionExplorer";
 import EvidenceDialog from "./EvidenceDialog";
 import ResearchAssistant from "./ResearchAssistant";
 const ResearchChart = lazy(() => import("./ResearchChart"));
@@ -51,6 +52,8 @@ export default function App() {
   const [selected, setSelected] = useState<Experiment[]>([]);
   const [pointIndex, setPointIndex] = useState(0);
   const [presentationMode, setPresentationMode] = useState(false);
+  const [assistantDraft, setAssistantDraft] = useState("");
+  const [activeSection, setActiveSection] = useState("mission");
   const overview = useQuery({
     queryKey: ["research"],
     queryFn: async () => (await api.get<Overview>("/research/overview")).data,
@@ -117,6 +120,42 @@ export default function App() {
           ? [...items, experiment]
           : items,
     );
+  const askAboutSelection = () => {
+    if (!selected.length) return;
+    setAssistantDraft(
+      `Compare the selected experiment runs ${selected.map((item) => item.run).join(", ")}. What differs, what is supported by the records, and what remains unknown?`,
+    );
+    requestAnimationFrame(() =>
+      document.getElementById("assistant")?.scrollIntoView({ behavior: "smooth" }),
+    );
+  };
+
+  useEffect(() => {
+    const sections = ["mission", "experiments", "chart", "assistant"]
+      .map((id) => document.getElementById(id))
+      .filter((section): section is HTMLElement => section !== null);
+    let frame = 0;
+    const updateActiveSection = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const marker = window.innerHeight * 0.32;
+        let current = sections[0]?.id ?? "mission";
+        for (const section of sections) {
+          if (section.getBoundingClientRect().top <= marker) current = section.id;
+          else break;
+        }
+        setActiveSection(current);
+      });
+    };
+    updateActiveSection();
+    window.addEventListener("scroll", updateActiveSection, { passive: true });
+    window.addEventListener("resize", updateActiveSection);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", updateActiveSection);
+      window.removeEventListener("resize", updateActiveSection);
+    };
+  }, []);
 
   return (
     <main
@@ -146,10 +185,21 @@ export default function App() {
           aria-label="Three minute demonstration route"
         >
           <strong>JUDGE ROUTE</strong>
-          <a href="#mission">1 · Mission</a>
-          <a href="#experiments">2 · Evidence</a>
-          <a href="#chart">3 · Chart</a>
-          <a href="#assistant">4 · Ask + cite</a>
+          {[
+            ["mission", "1 · Mission"],
+            ["experiments", "2 · Evidence"],
+            ["chart", "3 · Chart"],
+            ["assistant", "4 · Ask + cite"],
+          ].map(([id, label]) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className={activeSection === id ? "is-active" : ""}
+              aria-current={activeSection === id ? "step" : undefined}
+            >
+              {label}
+            </a>
+          ))}
           <button onClick={() => setPresentationMode(false)}>Reset view</button>
         </aside>
       )}
@@ -308,6 +358,13 @@ export default function App() {
           PSI-159 · CFI-G normal flames. Select up to four records to compare
           reported conditions. Blank values remain unknown.
         </p>
+        {experiments.data?.items && (
+          <ConditionExplorer
+            experiments={experiments.data.items}
+            selectedIds={new Set(selected.map((item) => item.id))}
+            onToggle={toggle}
+          />
+        )}
         {experiments.isError && (
           <p role="alert">Experiment records could not be loaded.</p>
         )}
@@ -329,7 +386,10 @@ export default function App() {
               </thead>
               <tbody>
                 {experiments.data?.items.map((e) => (
-                  <tr key={e.id}>
+                  <tr
+                    key={e.id}
+                    className={selected.some((item) => item.id === e.id) ? "is-selected" : ""}
+                  >
                     <td>
                       <input
                         type="checkbox"
@@ -376,6 +436,17 @@ export default function App() {
             Next
           </button>
         </div>
+        {selected.length > 0 && (
+          <div className="selection-dock" role="region" aria-label="Selected experiment actions">
+            <div>
+              <strong>{selected.length} experiment{selected.length === 1 ? "" : "s"} selected</strong>
+              <span>{selected.map((item) => item.run).join(" · ")}</span>
+            </div>
+            <button onClick={askAboutSelection}>Ask AI about selection ↗</button>
+            <button onClick={exportSelected}>Export CSV ↓</button>
+            <button onClick={() => setSelected([])}>Clear</button>
+          </div>
+        )}
         {selected.length > 0 && (
           <div className="comparison">
             <div className="section-heading">
@@ -469,9 +540,11 @@ export default function App() {
         )}
       </section>
       <ResearchAssistant
+        key={assistantDraft}
         experimentIds={selected.map((e) => e.id)}
         chartId={chart?.id}
         onCitation={setCitationId}
+        draftQuestion={assistantDraft}
       />
       <footer>
         FIREBUSTERS · NASA evidence, independently explored.{" "}

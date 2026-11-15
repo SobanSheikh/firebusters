@@ -30,12 +30,14 @@ export default function ResearchAssistant({
   experimentIds,
   chartId,
   onCitation,
+  draftQuestion,
 }: {
   experimentIds: string[];
   chartId?: string;
   onCitation: (id: string) => void;
+  draftQuestion?: string;
 }) {
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(draftQuestion ?? "");
   const [includeChart, setIncludeChart] = useState(false);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [busy, setBusy] = useState(false);
