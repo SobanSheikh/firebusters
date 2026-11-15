@@ -17,7 +17,7 @@ rate_lock = asyncio.Lock()
 
 
 class Question(BaseModel):
-    question: str = Field(min_length=3, max_length=1500)
+    question: str = Field(min_length=1, max_length=1500)
     experiment_ids: list[str] = Field(default_factory=list, max_length=4)
     chart_id: str | None = Field(default=None, max_length=150)
 
@@ -37,7 +37,7 @@ def purge(queue: deque[float], now: float) -> None:
 @router.post("/ask")
 async def ask(payload: Question, request: Request, response: Response):
     global active
-    if len(payload.question.strip()) < 3 or any(len(item) > 100 for item in payload.experiment_ids):
+    if not payload.question.strip() or any(len(item) > 100 for item in payload.experiment_ids):
         raise HTTPException(422, "Question or context is invalid")
     now = time.monotonic()
     key = client_key(request)

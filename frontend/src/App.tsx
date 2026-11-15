@@ -2,8 +2,9 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import ConditionExplorer from "./ConditionExplorer";
 import EvidenceDialog from "./EvidenceDialog";
+import LabBrief from "./LabBrief";
 import ResearchAssistant from "./ResearchAssistant";
-import SuppressionExplorer from "./SuppressionExplorer";
+import SuppressionExplorer, { type SuppressionRecord } from "./SuppressionExplorer";
 const ResearchChart = lazy(() => import("./ResearchChart"));
 import { api } from "./lib/api";
 
@@ -52,15 +53,27 @@ type Citation = {
   source_url: string;
 };
 
+const SECTIONS = [
+  ["mission", "00", "Mission"],
+  ["experiments", "01", "Experiments"],
+  ["suppression", "02", "Suppression"],
+  ["chart", "03", "Data lab"],
+  ["assistant", "04", "Ask AI"],
+] as const;
+const EXPERIMENT_PAGE_SIZE = 10;
+
 export default function App() {
   const [fuel, setFuel] = useState("");
   const [page, setPage] = useState(0);
   const [citationId, setCitationId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Experiment[]>([]);
+  const [selectedSuppression, setSelectedSuppression] = useState<SuppressionRecord[]>([]);
   const [pointIndex, setPointIndex] = useState(0);
   const [presentationMode, setPresentationMode] = useState(false);
   const [assistantDraft, setAssistantDraft] = useState("");
+  const [commandQuestion, setCommandQuestion] = useState("");
   const [activeSection, setActiveSection] = useState("mission");
+  const [scrollProgress, setScrollProgress] = useState(0);
   const overview = useQuery({
     queryKey: ["research"],
     queryFn: async () => (await api.get<Overview>("/research/overview")).data,
@@ -71,7 +84,13 @@ export default function App() {
       (
         await api.get<{ items: Experiment[]; total: number }>(
           "/research/experiments",
-          { params: { fuel: fuel || undefined, offset: page * 15, limit: 15 } },
+          {
+            params: {
+              fuel: fuel || undefined,
+              offset: page * EXPERIMENT_PAGE_SIZE,
+              limit: EXPERIMENT_PAGE_SIZE,
+            },
+          },
         )
       ).data,
   });
@@ -125,7 +144,8 @@ export default function App() {
     link.click();
     URL.revokeObjectURL(url);
   };
-  const toggle = (experiment: Experiment) =>
+  const toggle = (experiment: Experiment) => {
+    setSelectedSuppression([]);
     setSelected((items) =>
       items.some((x) => x.id === experiment.id)
         ? items.filter((x) => x.id !== experiment.id)
@@ -133,11 +153,39 @@ export default function App() {
           ? [...items, experiment]
           : items,
     );
+  };
+  const toggleSuppression = (record: SuppressionRecord) => {
+    setSelected([]);
+    setSelectedSuppression((items) =>
+      items.some((item) => item.id === record.id)
+        ? items.filter((item) => item.id !== record.id)
+        : items.length < 4
+          ? [...items, record]
+          : items,
+    );
+  };
   const askAboutSelection = () => {
     if (!selected.length) return;
     setAssistantDraft(
       `Compare the selected experiment runs ${selected.map((item) => item.run).join(", ")}. What differs, what is supported by the records, and what remains unknown?`,
     );
+    requestAnimationFrame(() =>
+      document.getElementById("assistant")?.scrollIntoView({ behavior: "smooth" }),
+    );
+  };
+  const askAboutSuppressionSelection = () => {
+    if (!selectedSuppression.length) return;
+    setAssistantDraft(
+      `Compare the selected BASS runs ${selectedSuppression.map((item) => item.run).join(", ")}. For each run, describe the reported material, airflow, oxygen, nitrogen application, and observed outcome. What differs, what is supported by the records, and what remains unknown? Do not infer causation.`,
+    );
+    requestAnimationFrame(() =>
+      document.getElementById("assistant")?.scrollIntoView({ behavior: "smooth" }),
+    );
+  };
+  const askFromCommandBar = () => {
+    const question = commandQuestion.trim();
+    if (!question) return;
+    setAssistantDraft(question);
     requestAnimationFrame(() =>
       document.getElementById("assistant")?.scrollIntoView({ behavior: "smooth" }),
     );
@@ -158,6 +206,8 @@ export default function App() {
           else break;
         }
         setActiveSection(current);
+        const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+        setScrollProgress(scrollable > 0 ? (window.scrollY / scrollable) * 100 : 0);
       });
     };
     updateActiveSection();
@@ -170,56 +220,101 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const keepBackendWarm = () => {
+      void api.get("/health/live", { timeout: 10_000 }).catch(() => undefined);
+    };
+    const interval = window.setInterval(keepBackendWarm, 10 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) entry.target.classList.add("is-visible");
+        }
+      },
+      { threshold: 0.08 },
+    );
+    const elements = document.querySelectorAll(".section, .metrics");
+    elements.forEach((element) => {
+      element.classList.add("reveal-section");
+      observer.observe(element);
+    });
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <main
-      className={`workspace ${presentationMode ? "presentation-mode" : ""}`}
+      className={`app-shell ${presentationMode ? "presentation-mode" : ""}`}
     >
-      <nav className="topbar">
-        <a href="#" className="brand">
-          <span className="brand-mark">F</span> FIREBUSTERS{" "}
-          <small>RESEARCH OBSERVATORY</small>
+      <div className="scroll-progress" aria-hidden="true">
+        <span style={{ width: `${scrollProgress}%` }} />
+      </div>
+      <aside className="mission-rail" aria-label="Mission journey">
+        <a href="#" className="brand rail-brand">
+          <img className="brand-logo" src="/firebusters-favicon.svg" alt="" />
+          <span>FIREBUSTERS</span>
         </a>
-        <a href="#mission">Mission</a>
-        <a href="#experiments">Experiments</a>
-        <a href="#suppression">Suppression</a>
-        <a href="#chart">Data lab</a>
-        <a href="#assistant">Ask AI</a>
-        <button
-          className="demo-toggle"
-          onClick={() => setPresentationMode((value) => !value)}
-          aria-pressed={presentationMode}
-        >
-          {presentationMode ? "Exit demo" : "3-min demo"}
-        </button>
-        <span className="status">NASA SOURCE COLLECTION</span>
-      </nav>
-      {presentationMode && (
-        <aside
-          className="demo-rail"
-          aria-label="Three minute demonstration route"
-        >
-          <strong>JUDGE ROUTE</strong>
-          {[
-            ["mission", "1 · Mission"],
-            ["experiments", "2 · Evidence"],
-            ["suppression", "3 · Suppression"],
-            ["chart", "4 · Chart"],
-            ["assistant", "5 · Ask + cite"],
-          ].map(([id, label]) => (
+        <p className="rail-label">MISSION JOURNEY</p>
+        <nav className="rail-navigation">
+          {SECTIONS.map(([id, number, label]) => (
             <a
               key={id}
               href={`#${id}`}
               className={activeSection === id ? "is-active" : ""}
               aria-current={activeSection === id ? "step" : undefined}
             >
+              <span>{number}</span>
               {label}
             </a>
           ))}
-          <button onClick={() => setPresentationMode(false)}>Reset view</button>
-        </aside>
-      )}
-      <header className="hero">
-        <div>
+        </nav>
+        <div className="rail-coverage">
+          <p>EVIDENCE COVERAGE</p>
+          <strong>{overview.data?.investigations.length ?? "—"} investigations</strong>
+          <i><span /></i>
+          <small>{overview.data?.experiment_count ?? "—"} records · 721 citations</small>
+        </div>
+        <button
+          className="rail-demo"
+          onClick={() => setPresentationMode((value) => !value)}
+          aria-pressed={presentationMode}
+        >
+          {presentationMode ? "Exit judge route" : "▶ Start 3-min demo"}
+        </button>
+      </aside>
+      <div className="workspace">
+        <nav className="topbar">
+          <a href="#" className="brand mobile-brand">
+            <img className="brand-logo" src="/firebusters-favicon.svg" alt="" />
+            FIREBUSTERS
+          </a>
+          <span className="topbar-context">MICROGRAVITY / COMBUSTION SCIENCE</span>
+          <span className="source-status"><i /> NASA evidence online</span>
+        </nav>
+        {presentationMode && (
+          <aside
+            className="demo-rail"
+            aria-label="Three minute demonstration route"
+          >
+            <strong>JUDGE ROUTE</strong>
+            {SECTIONS.map(([id, number, label]) => (
+              <a
+                key={id}
+                href={`#${id}`}
+                className={activeSection === id ? "is-active" : ""}
+                aria-current={activeSection === id ? "step" : undefined}
+              >
+                {number} · {label}
+              </a>
+            ))}
+            <button onClick={() => setPresentationMode(false)}>Reset view</button>
+          </aside>
+        )}
+        <header className="hero">
+          <div className="hero-copy">
           <p className="eyebrow">MICROGRAVITY / COMBUSTION SCIENCE</p>
           <h1>
             Follow the flame.
@@ -230,24 +325,48 @@ export default function App() {
             Find relevant NASA combustion investigations, extract usable data,
             and trace every interpretation back to source evidence.
           </p>
-          <a className="button primary" href="#mission">
-            Start the mission ↗
-          </a>
-        </div>
-        <div className="hero-note">
-          <span className="orbit" aria-hidden="true">
-            ◎
-          </span>
-          <p>
-            SMALL DROPLETS.
-            <br />
-            EXTRAORDINARY QUESTIONS.
-          </p>
-          <small>
-            How does combustion change when gravity no longer dominates?
-          </small>
-        </div>
-      </header>
+            <form
+              className="command-bar"
+              onSubmit={(event) => {
+                event.preventDefault();
+                askFromCommandBar();
+              }}
+            >
+              <span aria-hidden="true">✦</span>
+              <label className="sr-only" htmlFor="mission-question">Ask across the evidence</label>
+              <input
+                id="mission-question"
+                value={commandQuestion}
+                onChange={(event) => setCommandQuestion(event.target.value)}
+                placeholder="Ask about a fuel, material, run, or suppression outcome…"
+              />
+              <button type="submit" disabled={!commandQuestion.trim()}>
+                Ask ↗
+              </button>
+            </form>
+            <div className="command-suggestions" aria-label="Suggested starting points">
+              {["Why did N₂ suppression fail?", "Compare reported conditions", "Show available variables"].map((question) => (
+                <button
+                  key={question}
+                  type="button"
+                  onClick={() => setCommandQuestion(question)}
+                >
+                  {question}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="hero-note" aria-hidden="true">
+            <div className="orbit-system">
+              <i className="orbit-ring orbit-ring-outer" />
+              <i className="orbit-ring orbit-ring-inner" />
+              <i className="orbit-node" />
+              <i className="orbit-core" />
+            </div>
+            <p>LIVE EVIDENCE ORBIT</p>
+            <small>Scroll to move through the mission</small>
+          </div>
+        </header>
       {overview.isError && (
         <div role="alert" className="notice">
           Research data is unavailable. The API may be waking or the research
@@ -348,7 +467,7 @@ export default function App() {
           </div>
         </div>
       </section>
-      <section className="section" id="experiments">
+      <section className="section lab-workspace lab-workspace--gases" id="experiments">
         <div className="section-heading">
           <div>
             <p className="eyebrow">01 / INVESTIGATION EXPLORER</p>
@@ -370,6 +489,13 @@ export default function App() {
             </select>
           </label>
         </div>
+        <LabBrief
+          tone="gases"
+          dataset="PSI-159 · CFI-G"
+          purpose="Understand the reported conditions and outcomes of gaseous cool-flame runs in microgravity."
+          service="Filter fuels, map pressure and flow, select exact runs, and compare documented conditions."
+          output="A cited experimental subset for inspection, export, or an AI-assisted comparison."
+        />
         <p className="muted">
           PSI-159 · CFI-G normal flames. Select up to four records to compare
           reported conditions. Blank values remain unknown.
@@ -447,7 +573,8 @@ export default function App() {
           <span>Page {page + 1}</span>
           <button
             disabled={
-              !experiments.data || (page + 1) * 15 >= experiments.data.total
+              !experiments.data ||
+              (page + 1) * EXPERIMENT_PAGE_SIZE >= experiments.data.total
             }
             onClick={() => setPage((p) => p + 1)}
           >
@@ -501,10 +628,23 @@ export default function App() {
           </div>
         )}
       </section>
-      <SuppressionExplorer onCitation={setCitationId} />
-      <section className="section" id="chart">
+      <SuppressionExplorer
+        onCitation={setCitationId}
+        selected={selectedSuppression}
+        onToggle={toggleSuppression}
+        onAskSelection={askAboutSuppressionSelection}
+        onClearSelection={() => setSelectedSuppression([])}
+      />
+      <section className="section lab-workspace lab-workspace--droplet" id="chart">
         <p className="eyebrow">03 / THE DATA LAB</p>
         <h2>A droplet’s changing history.</h2>
+        <LabBrief
+          tone="droplet"
+          dataset="PSI-117 · DROPLET SERIES"
+          purpose="See how normalized droplet size changed through the recorded three-stage combustion history."
+          service="Explore the curve, move through its 205 source points, and inspect any exact CSV record."
+          output="A traceable visual measurement—not an AI-generated curve or a causal prediction."
+        />
         <p className="muted">
           PSI-117 · Experimental series from the three-stage combustion dataset.
           Normalized quantities preserve the source’s units.
@@ -561,7 +701,10 @@ export default function App() {
       </section>
       <ResearchAssistant
         key={assistantDraft}
-        experimentIds={selected.map((e) => e.id)}
+        experimentIds={[
+          ...selected.map((item) => item.id),
+          ...selectedSuppression.map((item) => item.id),
+        ]}
         chartId={chart?.id}
         onCitation={setCitationId}
         draftQuestion={assistantDraft}
@@ -570,6 +713,20 @@ export default function App() {
         FIREBUSTERS · NASA evidence, independently explored.{" "}
         <span>Every value has a source.</span>
       </footer>
+      <nav className="mobile-dock" aria-label="Mobile mission navigation">
+        {SECTIONS.map(([id, number, label]) => (
+          <a
+            key={id}
+            href={`#${id}`}
+            className={activeSection === id ? "is-active" : ""}
+            aria-current={activeSection === id ? "step" : undefined}
+          >
+            <span>{number}</span>
+            {label}
+          </a>
+        ))}
+      </nav>
+      </div>
       {citationId && (
         <EvidenceDialog onClose={() => setCitationId(null)}>
           <div className="section-heading">

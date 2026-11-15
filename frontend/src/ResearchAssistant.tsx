@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import axios from "axios";
+import LabBrief from "./LabBrief";
 import { api } from "./lib/api";
 
 type Answer = {
@@ -20,6 +21,7 @@ type Answer = {
   }[];
   follow_up_questions: string[];
   usage: {
+    router_calls?: number;
     retrieval_passes?: number;
     generation_calls?: number;
     evidence_records?: number;
@@ -42,6 +44,7 @@ export default function ResearchAssistant({
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const isConversation = answer?.mode === "conversation";
   const suggestions = [
     "Which indexed evidence is most relevant to cool-flame extinction, and why?",
     "Why did nitrogen fail to extinguish some BASS solid-material flames?",
@@ -50,7 +53,7 @@ export default function ResearchAssistant({
   ];
   const controller = useRef<AbortController | null>(null);
   async function submit() {
-    if (busy || question.trim().length < 3) return;
+    if (busy || !question.trim()) return;
     setBusy(true);
     setError("");
     setAnswer(null);
@@ -81,9 +84,16 @@ export default function ResearchAssistant({
     }
   }
   return (
-    <section className="section" id="assistant">
+    <section className="section lab-workspace lab-workspace--ai" id="assistant">
       <p className="eyebrow">04 / ASK FIREBUSTERS</p>
       <h2>Ask the evidence.</h2>
+      <LabBrief
+        tone="ai"
+        dataset="PSI-26 + PSI-117 + PSI-159"
+        purpose="Find relevant evidence across the reviewed combustion workspace without reading every source manually."
+        service="Improve the research query, retrieve matching records and passages, then generate a citation-checked answer."
+        output="A concise answer linked to reviewed evidence, plus explicit unknowns and interpretation limits."
+      />
       <p className="muted">
         Search experiment records, chart points, and PDF passages with semantic
         retrieval and keyword fallback. PDF extraction may omit diagrams or
@@ -115,7 +125,7 @@ export default function ResearchAssistant({
           id="research-question"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          minLength={3}
+          minLength={1}
           maxLength={1500}
           required
           rows={3}
@@ -143,7 +153,7 @@ export default function ResearchAssistant({
             />{" "}
             Include the droplet-history chart
           </label>
-          <button type="submit" disabled={busy || question.trim().length < 3}>
+          <button type="submit" disabled={busy || !question.trim()}>
             {busy ? "Retrieving and checking evidence…" : "Ask Firebusters ↗"}
           </button>
           {busy && (
@@ -160,13 +170,34 @@ export default function ResearchAssistant({
       )}
       {error && <p role="alert">{error}</p>}
       {answer && (
-        <div className="chart-panel" aria-live="polite">
-          <p className="eyebrow">
-            {answer.mode === "ai"
-              ? "AI EXPLANATION · CHECK THE SOURCES"
-              : "SOURCE EVIDENCE"}
-          </p>
-          {answer.message && <p>{answer.message}</p>}
+        <div
+          className={`chart-panel assistant-response ${
+            isConversation ? "assistant-response--conversation" : "assistant-response--evidence"
+          }`}
+          aria-live="polite"
+        >
+          <div className="assistant-response-heading">
+            <span className="assistant-response-avatar" aria-hidden="true">F</span>
+            <div>
+              <p className="eyebrow">
+                {isConversation
+                  ? "FIREBUSTERS AI · CONVERSATION"
+                  : answer.mode === "ai"
+                    ? "FIREBUSTERS AI · GROUNDED ANSWER"
+                    : "FIREBUSTERS · SOURCE EVIDENCE"}
+              </p>
+              <p className="assistant-response-status">
+                {isConversation
+                  ? "No evidence search was needed"
+                  : "Generated from reviewed records · verify the linked sources"}
+              </p>
+            </div>
+          </div>
+          {answer.message && (
+            <p className={isConversation ? "conversation-message" : undefined}>
+              {answer.message}
+            </p>
+          )}
           {answer.visuals?.map((visual) => (
             <article className="answer-visual" key={visual.chart_id}>
               <div>
@@ -239,17 +270,22 @@ export default function ResearchAssistant({
               ))}
             </details>
           )}
-          <p className="query-budget">
-            One retrieval pass ·{" "}
-            {answer.usage?.evidence_records ?? answer.evidence.length} evidence
-            records · {answer.usage?.generation_calls ?? 0} generation call
-          </p>
-          <p className="muted">
-            Citation IDs are checked against retrieved records. This does not
-            guarantee every generated interpretation is correct; inspect the
-            sources. Results cover retrieved records, not necessarily the full
-            investigation.
-          </p>
+          {!isConversation && (
+            <>
+              <p className="query-budget">
+                {answer.usage?.router_calls ?? 0} routing call ·{" "}
+                {answer.usage?.retrieval_passes ?? 0} retrieval pass ·{" "}
+                {answer.usage?.evidence_records ?? answer.evidence.length} evidence
+                records · {answer.usage?.generation_calls ?? 0} generation call
+              </p>
+              <p className="muted">
+                Citation IDs are checked against retrieved records. This does not
+                guarantee every generated interpretation is correct; inspect the
+                sources. Results cover retrieved records, not necessarily the full
+                investigation.
+              </p>
+            </>
+          )}
         </div>
       )}
     </section>

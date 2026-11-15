@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import re
 from decimal import Decimal
 from typing import TypedDict
@@ -13,8 +14,11 @@ from app.api.routes.research import records
 from app.core.config import settings
 from app.semantic_search import semantic_evidence
 
+logger = logging.getLogger("uvicorn.error")
+
 MAX_EVIDENCE = 12
 MAX_GENERATIONS = 1
+MAX_ROUTER_GENERATIONS = 1
 CHART_TERMS = {"droplet", "diameter", "history", "normalized", "chart", "plot", "curve", "series"}
 DEFINITION_PATTERNS = (
     r"\bwhat (?:is|was|are|were)\b",
@@ -26,6 +30,7 @@ DEFINITION_PATTERNS = (
 
 class ResearchState(TypedDict, total=False):
     question: str
+    retrieval_query: str
     experiment_ids: list[str]
     chart_id: str | None
     evidence: list[dict]
@@ -41,7 +46,8 @@ class ResearchState(TypedDict, total=False):
 STOP = set(
     "a an the is are was were what which how why does do did can could would should "
     "i we you me my our your please tell show explain compare about this that these those "
-    "and or of for to in on with from it its have has experiments experiment data records".split()
+    "and or of for to in on with from it its have has experiments experiment data records "
+    "hi hello hey hiya howdy thanks thank goodbye bye".split()
 )
 
 
@@ -67,14 +73,175 @@ def chart_requested(question: str) -> bool:
     return bool(words & CHART_TERMS) or "three stage" in normalized
 
 
+ROUTER_SYSTEM = """You route messages for Firebusters, a NASA combustion evidence assistant.
+Call search_nasa_evidence when the message asks a factual, scientific, data, experiment, comparison,
+chart, source, citation, modeling, spacecraft-fire, or product-capability question that could benefit
+from the indexed NASA evidence. This includes mixed messages such as 'hello, explain cool flames'.
+Do not call the tool only for standalone greetings, thanks, farewells, or casual conversation with no
+research request. In that case, reply briefly and invite a NASA combustion question.
+
+When calling the tool, rewrite the query to improve retrieval: remove conversational filler, make the
+scientific target explicit, and retain the user's intent. Preserve every test ID, material name, number,
+unit, and named investigation exactly. Never add a claim, condition, or identifier the user did not provide.
+
+Use this reviewed-collection terminology only as retrieval aliases, never as factual assumptions:
+- PSI-26: Burning and Suppression of Solids (BASS); solid-material burning, airflow, nitrogen suppression.
+- PSI-117: droplet combustion, cool-flame and three-stage combustion, normalized droplet-diameter history.
+- PSI-159: Cool Flames Investigation with Gases (CFI-G), Advanced Combustion via Microgravity
+  Experiments (ACME), gaseous fuels, spherical porous burners, normal and inverse flames.
+- ISS means International Space Station; CIR means Combustion Integrated Rack.
+
+Do not silently choose one investigation when the user's wording is ambiguous. Include relevant alternative
+aliases instead. Never remove or weaken a scientific noun, acronym, fuel, material, variable, comparison,
+negation, run/test ID, unit, condition, or scope. Do not broaden a specific question. A rewritten query must
+be at least as specific as the original; when no safe improvement is available, use the original query.
+"""
+
+RAG_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_nasa_evidence",
+        "description": "Search reviewed NASA combustion records and documents, then answer with citations.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "A faithful, retrieval-optimized version of the user's research question.",
+                }
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+SMALL_TALK = {
+    "hi", "hello", "hey", "hiya", "howdy", "good morning", "good afternoon", "good evening",
+    "how are you", "thanks", "thank you", "thank you very much", "thx", "bye", "goodbye", "see you",
+}
+
+
+def normalized_message(question: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9']+", question.lower()))
+
+
+def log_query(question: str) -> str:
+    """Keep verification logs single-line and bounded without logging evidence or credentials."""
+    return " ".join(question.split())[:300]
+
+
+def preserves_query_facts(original: str, improved: str) -> bool:
+    """Reject rewrites that lose user-supplied numbers or identifier-like tokens."""
+    original_tokens = set(re.findall(r"\b(?:\d[\w.-]*|[a-z]+-\d+[\w.-]*)\b", original.lower()))
+    improved_lower = improved.lower()
+    return all(token in improved_lower for token in original_tokens)
+
+
+def restore_query_terms(original: str, improved: str) -> tuple[str, list[str]]:
+    """Retain every meaningful original search term while allowing safe alias expansion."""
+    original_terms = [term for term in search_terms(original).split(" | ") if term]
+    improved_tokens = set(re.findall(r"[a-z0-9]+", improved.lower()))
+    missing = [term for term in original_terms if term not in improved_tokens]
+    if not missing:
+        return improved, []
+    restored = f"{improved} {' '.join(missing)}".strip()
+    return (restored, missing) if len(restored) <= 1500 else (original, original_terms)
+
+
+async def route_question(question: str) -> dict:
+    """Let the configured model choose direct conversation or one bounded RAG tool call."""
+    usage = {"router_calls": 0, "generation_calls": 0, "retrieval_passes": 0, "evidence_records": 0}
+    if not settings.ai_api_key or settings.ai_provider not in {"groq", "gemini", "openai"}:
+        if normalized_message(question) in SMALL_TALK:
+            return {
+                "action": "direct",
+                "message": "Hello! Ask me about NASA combustion experiments, suppression, droplet history, or a test ID.",
+                "usage": usage,
+            }
+        return {"action": "search", "query": question, "usage": usage}
+    base = settings.resolved_ai_base_url
+    if not base:
+        return {"action": "search", "query": question, "usage": usage}
+    try:
+        logger.info(
+            "assistant.router.call provider=%s model=%s original_query=%r",
+            settings.ai_provider,
+            settings.ai_model,
+            log_query(question),
+        )
+        async with httpx.AsyncClient(timeout=min(settings.ai_timeout_seconds, 15)) as client:
+            response = await client.post(
+                base.rstrip("/") + "/chat/completions",
+                headers={"Authorization": f"Bearer {settings.ai_api_key}"},
+                json={
+                    "model": settings.ai_model,
+                    "temperature": 0,
+                    "max_tokens": 220,
+                    "messages": [
+                        {"role": "system", "content": ROUTER_SYSTEM},
+                        {"role": "user", "content": question},
+                    ],
+                    "tools": [RAG_TOOL],
+                    "tool_choice": "auto",
+                },
+            )
+            response.raise_for_status()
+            message = response.json()["choices"][0]["message"]
+        usage = {**usage, "router_calls": MAX_ROUTER_GENERATIONS, "generation_calls": MAX_ROUTER_GENERATIONS}
+        tool_calls = message.get("tool_calls") or []
+        if tool_calls:
+            call = tool_calls[0]
+            if call.get("function", {}).get("name") != "search_nasa_evidence":
+                raise ValueError("Unknown tool")
+            arguments = json.loads(call["function"]["arguments"])
+            proposed = str(arguments.get("query", "")).strip()
+            accepted = bool(
+                proposed
+                and len(proposed) <= 1500
+                and preserves_query_facts(question, proposed)
+            )
+            improved, restored_terms = (
+                restore_query_terms(question, proposed) if accepted else (question, [])
+            )
+            logger.info(
+                "assistant.router.tool tool=search_nasa_evidence rewrite_accepted=%s "
+                "restored_terms=%s original_query=%r retrieval_query=%r",
+                accepted,
+                restored_terms,
+                log_query(question),
+                log_query(improved),
+            )
+            return {"action": "search", "query": improved, "usage": usage}
+        direct = str(message.get("content") or "").strip()
+        if not direct:
+            raise ValueError("Empty direct response")
+        logger.info("assistant.router.direct original_query=%r", log_query(question))
+        return {"action": "direct", "message": direct[:600], "usage": usage}
+    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "assistant.router.fallback error=%s original_query=%r",
+            type(exc).__name__,
+            log_query(question),
+        )
+        if normalized_message(question) in SMALL_TALK:
+            return {
+                "action": "direct",
+                "message": "Hello! Ask me about NASA combustion experiments, suppression, droplet history, or a test ID.",
+                "usage": usage,
+            }
+        return {"action": "search", "query": question, "usage": usage}
+
+
 async def retrieve(state: ResearchState):
     """One bounded hybrid retrieval pass; no model-selected loops or arbitrary SQL."""
     experiment_evidence: list[dict] = []
     chart_evidence: list[dict] = []
     visuals: list[dict] = []
     selected = state.get("experiment_ids", [])
+    retrieval_query = state.get("retrieval_query", state["question"])
     intent = question_intent(state["question"])
-    terms = search_terms(state["question"])
+    terms = search_terms(retrieval_query)
     if selected:
         experiments = await records(
             "SELECT payload FROM fb_experiments WHERE id = ANY(:ids) ORDER BY id", ids=selected
@@ -103,7 +270,7 @@ async def retrieve(state: ResearchState):
     chart_id = state.get("chart_id")
     if chart_id:
         charts = await records("SELECT payload FROM fb_charts WHERE id=:id", id=chart_id)
-    elif chart_requested(state["question"]):
+    elif chart_requested(retrieval_query):
         charts = await records("SELECT payload FROM fb_charts ORDER BY id LIMIT 1")
     else:
         charts = []
@@ -151,7 +318,7 @@ async def retrieve(state: ResearchState):
         )
 
     # Exactly one semantic query embedding at most; semantic_evidence falls back cleanly.
-    semantic = await semantic_evidence(state["question"])
+    semantic = await semantic_evidence(retrieval_query)
     page_evidence: list[dict] = []
     if terms:
         overview_order = (
@@ -209,11 +376,21 @@ async def retrieve(state: ResearchState):
         for visual in visuals:
             visual["citation_ids"] = [citation for citation in visual["citation_ids"] if citation in allowed]
         visuals = [visual for visual in visuals if visual["citation_ids"]]
+    logger.info(
+        "assistant.rag.complete retrieval_query=%r evidence_records=%s visuals=%s",
+        log_query(retrieval_query),
+        len(evidence),
+        len(visuals[:1]),
+    )
     return {
         "evidence": evidence,
         "visuals": visuals[:1],
         "intent": intent,
-        "usage": {"retrieval_passes": 1, "generation_calls": 0, "evidence_records": len(evidence)},
+        "usage": {
+            **state.get("usage", {}),
+            "retrieval_passes": 1,
+            "evidence_records": len(evidence),
+        },
     }
 
 
@@ -344,6 +521,15 @@ async def synthesize(state: ResearchState):
         }
     evidence_for_model, citation_aliases = alias_evidence(state["evidence"])
     try:
+        logger.info(
+            "assistant.synthesis.call provider=%s model=%s original_query=%r "
+            "retrieval_query=%r evidence_records=%s",
+            settings.ai_provider,
+            settings.ai_model,
+            log_query(state["question"]),
+            log_query(state.get("retrieval_query", state["question"])),
+            len(evidence_for_model),
+        )
         async with httpx.AsyncClient(timeout=settings.ai_timeout_seconds) as client:
             response = await client.post(
                 base.rstrip("/") + "/chat/completions",
@@ -360,6 +546,7 @@ async def synthesize(state: ResearchState):
                             "content": json.dumps(
                                 {
                                     "question": state["question"],
+                                    "retrieval_query": state.get("retrieval_query", state["question"]),
                                     "question_intent": state.get("intent", "research"),
                                     "reviewed_scope": "Indexed PSI-26, PSI-117, and PSI-159 evidence only",
                                     "evidence": evidence_for_model,
@@ -381,14 +568,23 @@ async def synthesize(state: ResearchState):
                         citation_aliases.get(citation, citation)
                         for citation in claim["citation_ids"]
                     ]
+        logger.info(
+            "assistant.synthesis.complete claims=%s follow_up_questions=%s",
+            len(claims[:5]),
+            len(follow_up[:3]),
+        )
         return {
             "claims": claims[:5],
             "follow_up_questions": follow_up[:3],
             "mode": "ai",
             "message": "",
-            "usage": {**usage, "generation_calls": MAX_GENERATIONS},
+            "usage": {
+                **usage,
+                "generation_calls": usage.get("generation_calls", 0) + MAX_GENERATIONS,
+            },
         }
-    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+        logger.warning("AI synthesis fallback: %s", type(exc).__name__)
         return {
             "claims": [],
             "follow_up_questions": [],
@@ -506,8 +702,37 @@ graph = builder.compile()
 
 async def answer(question: str, experiment_ids: list[str], chart_id: str | None):
     async with asyncio.timeout(settings.assistant_timeout_seconds):
+        if experiment_ids:
+            route = {
+                "action": "search",
+                "query": question,
+                "usage": {
+                    "router_calls": 0,
+                    "generation_calls": 0,
+                    "retrieval_passes": 0,
+                    "evidence_records": 0,
+                },
+            }
+        else:
+            route = await route_question(question)
+        if route["action"] == "direct":
+            return {
+                "claims": [],
+                "evidence": [],
+                "visuals": [],
+                "follow_up_questions": [],
+                "usage": route["usage"],
+                "mode": "conversation",
+                "message": route["message"],
+            }
         result = await graph.ainvoke(
-            {"question": question, "experiment_ids": experiment_ids, "chart_id": chart_id},
+            {
+                "question": question,
+                "retrieval_query": route["query"],
+                "experiment_ids": experiment_ids,
+                "chart_id": chart_id,
+                "usage": route["usage"],
+            },
             {"recursion_limit": 6},
         )
     defaults = {

@@ -1,10 +1,71 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.assistant_service import graph, search_terms, synthesize, validate_claims
+from app.assistant_service import (
+    answer,
+    graph,
+    preserves_query_facts,
+    restore_query_terms,
+    search_terms,
+    synthesize,
+    validate_claims,
+)
 
 
 class AssistantTests(unittest.IsolatedAsyncioTestCase):
+    async def test_standalone_conversation_skips_rag(self):
+        route = {
+            "action": "direct",
+            "message": "Hello! Ask me about NASA combustion evidence.",
+            "usage": {
+                "router_calls": 1,
+                "generation_calls": 1,
+                "retrieval_passes": 0,
+                "evidence_records": 0,
+            },
+        }
+        graph_mock = AsyncMock()
+        with (
+            patch("app.assistant_service.route_question", new=AsyncMock(return_value=route)),
+            patch("app.assistant_service.graph.ainvoke", new=graph_mock),
+        ):
+            result = await answer("hello", [], None)
+        self.assertEqual(result["mode"], "conversation")
+        self.assertEqual(result["usage"]["retrieval_passes"], 0)
+        self.assertEqual(result["follow_up_questions"], [])
+        graph_mock.assert_not_awaited()
+
+    async def test_model_improved_query_is_passed_to_rag(self):
+        improved = "NASA cool diffusion flame microgravity experiment purpose"
+        route = {
+            "action": "search",
+            "query": improved,
+            "usage": {
+                "router_calls": 1,
+                "generation_calls": 1,
+                "retrieval_passes": 0,
+                "evidence_records": 0,
+            },
+        }
+        graph_result = {
+            "claims": [],
+            "evidence": [],
+            "visuals": [],
+            "follow_up_questions": [],
+            "usage": route["usage"],
+            "mode": "no_evidence",
+            "message": "No matching evidence.",
+        }
+        graph_mock = AsyncMock(return_value=graph_result)
+        with (
+            patch("app.assistant_service.route_question", new=AsyncMock(return_value=route)),
+            patch("app.assistant_service.graph.ainvoke", new=graph_mock),
+        ):
+            await answer("Hi, what is the cool flame experiment?", [], None)
+        state = graph_mock.await_args.args[0]
+        self.assertEqual(state["question"], "Hi, what is the cool flame experiment?")
+        self.assertEqual(state["retrieval_query"], improved)
+
     async def test_graph_returns_no_evidence_without_calling_model(self):
         with (patch("app.assistant_service.records", new=AsyncMock(return_value=[])),
               patch("app.assistant_service.semantic_evidence", new=AsyncMock(return_value=[]))):
@@ -48,6 +109,26 @@ class AssistantTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(";", terms)
         self.assertNotIn("'", terms)
         self.assertLessEqual(len(terms.split(" | ")), 24)
+
+    def test_query_rewrite_must_preserve_identifiers_numbers_and_units(self):
+        original = "Explain PSI-26 test 53 at 500 cc/min"
+        self.assertTrue(
+            preserves_query_facts(
+                original,
+                "PSI-26 test 53 nitrogen suppression evidence at 500 cc/min",
+            )
+        )
+        self.assertFalse(preserves_query_facts(original, "PSI-26 nitrogen suppression evidence"))
+
+    def test_query_rewrite_restores_meaningful_terms_without_filler(self):
+        query, restored = restore_query_terms(
+            "Hi, why did nitrogen not extinguish the PMMA flame?",
+            "BASS solid-material suppression evidence",
+        )
+        for term in ["nitrogen", "not", "extinguish", "pmma", "flame"]:
+            self.assertIn(term, query.lower())
+            self.assertIn(term, restored)
+        self.assertNotIn("hi", restored)
 
     def test_unknown_citation_is_rejected(self):
         result = validate_claims({"evidence": [{"citation_id": "known", "data": {"value": 12}}],
