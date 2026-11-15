@@ -108,7 +108,7 @@ Do not upload the complete 1.90 TB PSI-159 archive. Upload only selected raw ass
 - Embed report chunks, guide sections, investigation descriptions and safety case studies.
 - Query structured experiment records using SQL; do not embed every numerical row.
 - Use Groq as the default inference provider through its OpenAI-compatible endpoint.
-- Keep model, base URL and credentials configurable so OpenAI or Anthropic can be selected without changing product logic.
+- Keep model, base URL and credentials configurable so Gemini, OpenAI or Anthropic can be selected without changing product logic.
 - Cache common guided-story responses and return structured charts/data when the LLM is unavailable.
 - Add rate limits and short provider timeouts before the public demo.
 

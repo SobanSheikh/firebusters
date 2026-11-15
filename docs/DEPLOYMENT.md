@@ -104,7 +104,7 @@ AI_MAX_OUTPUT_TOKENS=2048
 GROQ_API_KEY=...
 ```
 
-Groq is the default provider. To switch providers, change `AI_PROVIDER`, `AI_MODEL`, the provider key, and `AI_BASE_URL` when using another OpenAI-compatible endpoint. Add the R2 variables only when the extensive storage plan is activated.
+Groq is the current default provider. Gemini remains supported for later use through `https://generativelanguage.googleapis.com/v1beta/openai/`. To switch providers, change `AI_PROVIDER`, `AI_MODEL`, the provider key, and `AI_BASE_URL`. Add the R2 variables only when the extensive storage plan is activated.
 
 ### Vercel
 
