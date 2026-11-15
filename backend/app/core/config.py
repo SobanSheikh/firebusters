@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_publishable_key: str | None = None
     supabase_secret_key: str | None = None
+    supabase_storage_bucket: str = "firebusters-assets"
     ai_provider: str = "gemini"
     gemini_api_key: str | None = None
     openai_api_key: str | None = None

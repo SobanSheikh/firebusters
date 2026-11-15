@@ -7,7 +7,7 @@ Firebusters uses four managed services so the hackathon deployment stays small a
 | Web app | Vercel | React/Vite static deployment and CDN |
 | API | Render (temporary) | Dockerized FastAPI service |
 | Database | Supabase | PostgreSQL and pgvector |
-| Object storage | Cloudflare R2 | Private NASA source files and generated artifacts |
+| Object storage | Supabase Storage (MVP) | Private NASA source files and generated artifacts |
 
 Redis and Celery are intentionally deferred. Add a worker only when ingestion must continue after an API request ends or multiple users can start jobs concurrently.
 
@@ -42,7 +42,7 @@ The architecture decision and rationale are recorded in [ARCHITECTURE.md](ARCHIT
 
 Render provides `PORT`; the backend Dockerfile reads it and defaults to `8000` locally. The liveness endpoint does not depend on the database. The full health endpoint does, which makes it useful for diagnostics without causing a transient database issue to restart the API.
 
-The free service sleeps after 15 minutes without inbound traffic and can take approximately one minute to wake. Open the health endpoint two to three minutes before judging. Do not put ingestion inside a web request; run it locally and upload normalized outputs to Supabase/R2.
+The free service sleeps after 15 minutes without inbound traffic and can take approximately one minute to wake. Open the health endpoint two to three minutes before judging. Do not put ingestion inside a web request; run it locally and upload normalized outputs to Supabase Storage/PostgreSQL.
 
 ## 3. Vercel frontend
 
@@ -61,9 +61,20 @@ VITE_API_BASE_URL=https://YOUR_RENDER_HOST/api/v1
 
 Vite variables are public browser configuration. Never create a `VITE_SUPABASE_SECRET_KEY` or expose an R2 secret.
 
-## 4. Cloudflare R2
+## 4. Supabase Storage
 
-R2 is optional until upload/ingestion features are implemented.
+The presentation MVP uses a private bucket named `firebusters-assets`.
+
+- Original files and presentation artifacts go into Storage.
+- Metadata, chunks, citations, vectors and compact statistics go into PostgreSQL.
+- The backend uses the secret key to create short-lived signed URLs.
+- Never expose `SUPABASE_SECRET_KEY` in a `VITE_*` variable.
+
+The ingestion pipeline runs locally and uploads only the current 141-file dataset. See [PRODUCT_PLAN.md](PRODUCT_PLAN.md) for the tiered processing scope.
+
+## 5. Cloudflare R2 (later)
+
+R2 is deferred until larger NASA datasets, videos, Parquet or grids make it necessary.
 
 1. Create a private bucket named `flamelens-assets`.
 2. Create an Object Read & Write API token scoped only to that bucket.
@@ -84,14 +95,11 @@ CORS_ORIGINS=https://YOUR_VERCEL_DOMAIN
 SUPABASE_URL=...
 SUPABASE_PUBLISHABLE_KEY=...
 SUPABASE_SECRET_KEY=...
+SUPABASE_STORAGE_BUCKET=firebusters-assets
 AI_PROVIDER=gemini
-GEMINI_API_KEY=...
-R2_ENDPOINT=...
-R2_BUCKET=flamelens-assets
-R2_ACCESS_KEY_ID=...
-R2_SECRET_ACCESS_KEY=...
-R2_PUBLIC_BASE_URL=
 ```
+
+Add `GEMINI_API_KEY` when assisted synthesis is implemented. Add the R2 variables only when the extensive storage plan is activated.
 
 ### Vercel
 

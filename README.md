@@ -38,4 +38,4 @@ The backend and PostgreSQL are containerized. The Vite frontend runs directly wi
 
 ## Deploy
 
-The deadline deployment uses Vercel, Render, Supabase, and Cloudflare R2. Koyeb remains the post-demo backend target after account approval. See the [architecture decision](docs/ARCHITECTURE.md) for the rationale and the [deployment guide](docs/DEPLOYMENT.md) for configuration and deployment order.
+The presentation deployment uses Vercel, Render, Supabase PostgreSQL/Storage, and only the currently downloaded NASA files. Koyeb and Cloudflare R2 remain post-demo options. See the [product plan](docs/PRODUCT_PLAN.md), [architecture decision](docs/ARCHITECTURE.md), and [deployment guide](docs/DEPLOYMENT.md).

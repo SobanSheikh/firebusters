@@ -19,7 +19,8 @@ Koyeb
 FastAPI agent and analytics API
         │
         ├── Supabase PostgreSQL + pgvector
-        ├── Cloudflare R2 object storage
+        ├── Supabase Storage for the presentation MVP
+        ├── Cloudflare R2 for later large assets
         ├── Supabase Edge Functions + gte-small embeddings
         └── Gemini API for generation and tool calling
 
@@ -32,7 +33,8 @@ Heavy ingestion and scientific preprocessing
 | Frontend | Vercel | React application, CDN, HTTPS and preview deployments |
 | Backend | Koyeb Free | Dockerized FastAPI API |
 | Database | Supabase Free | PostgreSQL, pgvector and optional authentication |
-| Object storage | Cloudflare R2 | PDFs, selected videos, Parquet, grids, images and exports |
+| MVP object storage | Supabase Storage | Current documents and presentation artifacts |
+| Extended object storage | Cloudflare R2 | Large videos, Parquet, grids, images and exports |
 | Embeddings | Supabase Edge Functions + `gte-small` | 384-dimensional semantic-search vectors |
 | Generation | Gemini | Agent reasoning, synthesis and tool calling |
 | Heavy ingestion | Local machine | Extraction, conversion, preprocessing and bulk uploads |
@@ -63,7 +65,7 @@ This does not change the workload boundary:
 
 - Heavy ingestion stays local.
 - PostgreSQL and vectors stay in Supabase.
-- Large assets stay in R2.
+- Presentation assets stay in Supabase Storage; later large assets move to R2.
 - Render serves only the online API.
 - Warm the free Render service immediately before judging because it sleeps after inactivity.
 
