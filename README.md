@@ -10,7 +10,7 @@ The project mirrors the core go4gr8 stack:
 - TanStack Query, Axios, Zustand and Recharts
 - FastAPI, Pydantic, async SQLAlchemy and Alembic
 - PostgreSQL 16 with pgvector
-- LangGraph/LangChain with OpenAI and Anthropic provider support
+- Provider-switchable AI with Groq as the default OpenAI-compatible endpoint
 - Docker Compose and `uv`
 
 ## Run locally

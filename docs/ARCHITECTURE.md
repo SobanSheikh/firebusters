@@ -22,7 +22,7 @@ FastAPI agent and analytics API
         ├── Supabase Storage for the presentation MVP
         ├── Cloudflare R2 for later large assets
         ├── Supabase Edge Functions + gte-small embeddings
-        └── Gemini API for generation and tool calling
+        └── Groq API for generation and tool calling
 
 Local machine
 Heavy ingestion and scientific preprocessing
@@ -36,7 +36,7 @@ Heavy ingestion and scientific preprocessing
 | MVP object storage | Supabase Storage | Current documents and presentation artifacts |
 | Extended object storage | Cloudflare R2 | Large videos, Parquet, grids, images and exports |
 | Embeddings | Supabase Edge Functions + `gte-small` | 384-dimensional semantic-search vectors |
-| Generation | Gemini | Agent reasoning, synthesis and tool calling |
+| Generation | Groq by default | Provider-switchable reasoning, synthesis and tool calling |
 | Heavy ingestion | Local machine | Extraction, conversion, preprocessing and bulk uploads |
 | CI/CD | Platform Git integration; GitHub Actions later | Builds, tests and automatic deployments |
 
@@ -107,7 +107,8 @@ Do not upload the complete 1.90 TB PSI-159 archive. Upload only selected raw ass
 - Generate semantic-search embeddings with the Supabase Edge `gte-small` model.
 - Embed report chunks, guide sections, investigation descriptions and safety case studies.
 - Query structured experiment records using SQL; do not embed every numerical row.
-- Use Gemini as the default generation provider while retaining the provider abstraction for OpenAI and Anthropic.
+- Use Groq as the default inference provider through its OpenAI-compatible endpoint.
+- Keep model, base URL and credentials configurable so OpenAI or Anthropic can be selected without changing product logic.
 - Cache common guided-story responses and return structured charts/data when the LLM is unavailable.
 - Add rate limits and short provider timeouts before the public demo.
 
@@ -129,7 +130,7 @@ Run on Koyeb:
 - PostgreSQL queries
 - Lightweight analysis
 - Retrieval and agent orchestration
-- Gemini calls
+- LLM provider calls
 - Streaming API responses
 - Presigned R2 URL generation
 

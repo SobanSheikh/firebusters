@@ -96,10 +96,15 @@ SUPABASE_URL=...
 SUPABASE_PUBLISHABLE_KEY=...
 SUPABASE_SECRET_KEY=...
 SUPABASE_STORAGE_BUCKET=firebusters-assets
-AI_PROVIDER=gemini
+AI_PROVIDER=groq
+AI_MODEL=llama-3.3-70b-versatile
+AI_BASE_URL=https://api.groq.com/openai/v1
+AI_TIMEOUT_SECONDS=30
+AI_MAX_OUTPUT_TOKENS=2048
+GROQ_API_KEY=...
 ```
 
-Add `GEMINI_API_KEY` when assisted synthesis is implemented. Add the R2 variables only when the extensive storage plan is activated.
+Groq is the default provider. To switch providers, change `AI_PROVIDER`, `AI_MODEL`, the provider key, and `AI_BASE_URL` when using another OpenAI-compatible endpoint. Add the R2 variables only when the extensive storage plan is activated.
 
 ### Vercel
 

@@ -54,7 +54,7 @@ Firebusters lets a judge explore the currently available microgravity-combustion
 
 6. **Health and graceful degradation**
    - The library, evidence and charts work without an LLM.
-   - Gemini-assisted synthesis is optional and enabled only after a key is configured.
+   - Groq-assisted synthesis is optional and enabled only after a key is configured.
 
 ### One-day ingestion scope
 
